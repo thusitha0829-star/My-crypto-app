@@ -1,53 +1,27 @@
 import streamlit as st
-import requests
+import yfinance as yf
 import pandas as pd
 
 st.set_page_config(page_title="Scalping TA Signal App", page_icon="📈", layout="centered")
 
-st.title("⚡ Live Crypto Scalping & TA App")
-st.caption("Real-Time Data via Public API (EMA, RSI & Candlestick Patterns)")
+st.title("⚡ Live Crypto Scalping App")
+st.caption("Real-Time Data via Yahoo Finance (EMA & RSI)")
 
-# Symbol to CoinGecko ID Mapping
-COIN_MAP = {
-    'BTC': 'bitcoin',
-    'ETH': 'ethereum',
-    'SOL': 'solana',
-    'XRP': 'ripple',
-    'ADA': 'cardano',
-    'DOGE': 'dogecoin',
-    'KAT': 'kaspium',  # OR 'kaspa' depending on ticker
-    'PEPE': 'pepe',
-    'BNB': 'binancecoin'
-}
+default_watchlist = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'ADA-USD', 'DOGE-USD']
 
-def get_crypto_data(coin_symbol):
-    sym = coin_symbol.strip().upper().replace("USDT", "")
-    coin_id = COIN_MAP.get(sym, sym.lower())
-    
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=1"
-    headers = {'User-Agent': 'Mozilla/5.0'}
+def get_crypto_data(symbol):
+    sym = symbol.strip().upper().replace("USDT", "-USD")
+    if not sym.endswith("-USD"):
+        sym += "-USD"
     
     try:
-        res = requests.get(url, headers=headers, timeout=8)
-        if res.status_code == 200:
-            prices = [item[1] for item in res.json().get('prices', [])]
-            if len(prices) >= 20:
-                return prices, sym
+        ticker = yf.Ticker(sym)
+        df = ticker.history(period="1d", interval="5m")
+        if not df.empty and len(df) >= 20:
+            prices = df['Close'].tolist()
+            return prices, sym.replace("-USD", "/USDT")
     except Exception:
         pass
-    
-    # Backup API (CoinCap) if CoinGecko fails
-    try:
-        url_backup = f"https://api.coincap.io/v2/assets/{coin_id}/history?interval=m5"
-        res2 = requests.get(url_backup, headers=headers, timeout=8)
-        if res2.status_code == 200:
-            data = res2.json().get('data', [])
-            prices = [float(x['priceUsd']) for x in data]
-            if len(prices) >= 20:
-                return prices, sym
-    except Exception:
-        pass
-
     return None, sym
 
 def calculate_ema(prices, period):
@@ -71,10 +45,11 @@ def calculate_rsi(prices, period=14):
     return 100 - (100 / (1 + (avg_gain / avg_loss)))
 
 def analyze_coin(symbol):
-    prices, clean_sym = get_crypto_data(symbol)
-    if not prices:
+    data = get_crypto_data(symbol)
+    if not data:
         return None
-
+    
+    prices, clean_sym = data
     current_price = prices[-1]
     ema20 = calculate_ema(prices, 20)
     ema50 = calculate_ema(prices, 50)
@@ -90,7 +65,7 @@ def analyze_coin(symbol):
     trend = "🟢 Bullish" if current_price > ema20 else "🔴 Bearish"
 
     return {
-        "Coin": f"{clean_sym}/USDT",
+        "Coin": clean_sym,
         "Price ($)": f"{current_price:.4f}" if current_price < 1 else f"{current_price:.2f}",
         "Signal": signal,
         "Trend": trend,
@@ -99,11 +74,11 @@ def analyze_coin(symbol):
 
 # --- SEARCH ANY COIN ---
 st.subheader("🔍 Any Coin Search")
-custom_coin = st.text_input("Enter Coin Name (e.g. BTC, ETH, SOL, DOGE):", value="BTC")
+custom_coin = st.text_input("Enter Coin Ticker (e.g. BTC, ETH, SOL, DOGE):", value="BTC")
 
 if st.button("Analyze Custom Coin"):
     if custom_coin:
-        with st.spinner("Fetching Market Data..."):
+        with st.spinner("Fetching Live Market Data..."):
             res = analyze_coin(custom_coin)
             if res:
                 col1, col2, col3 = st.columns(3)
@@ -112,21 +87,19 @@ if st.button("Analyze Custom Coin"):
                 col3.metric("Signal", res["Signal"])
                 st.json(res)
             else:
-                st.error(f"Could not fetch data for '{custom_coin}'. Try typing BTC, ETH, SOL, DOGE or PEPE.")
+                st.error(f"Could not fetch data for '{custom_coin}'. Try entering valid symbol like BTC, SOL, ETH.")
 
 st.divider()
 
 # --- LIVE WATCHLIST ---
-st.subheader("📊 Market Scalping Dashboard")
+st.subheader("📊 Market Scalping Dashboard (5M)")
 
-if st.button("🔄 Refresh Market Data"):
+if st.button("🔄 Refresh Data"):
     st.rerun()
 
-watchlist = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE']
 results = []
-
-with st.spinner("Analyzing Watchlist Coins..."):
-    for sym in watchlist:
+with st.spinner("Analyzing Market Watchlist..."):
+    for sym in default_watchlist:
         analysis = analyze_coin(sym)
         if analysis:
             results.append(analysis)
