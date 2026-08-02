@@ -3,23 +3,45 @@ import yfinance as yf
 import pandas as pd
 
 # Page Config
-st.set_page_config(page_title="SMC Stable Swing", page_icon="📈", layout="wide")
+st.set_page_config(page_title="SMC High-Accuracy Terminal", page_icon="🎯", layout="wide")
 
-st.title("📈 SMC Stable Swing Signal Terminal")
-st.caption("Confirmed Closed-Candle Signals Only (No Repainting / No Frequent Flips)")
+# Custom CSS for Developer Header
+st.markdown("""
+<style>
+    .developer-card {
+        background-color: #1e222d;
+        padding: 15px 25px;
+        border-radius: 10px;
+        border-left: 5px solid #f0b90b;
+        margin-bottom: 25px;
+    }
+    .dev-title { font-size: 1.8rem; font-weight: 800; color: #ffffff; margin: 0; }
+    .dev-sub { font-size: 0.95rem; color: #848e9c; margin-top: 5px; }
+    .dev-info { font-size: 1rem; color: #f0b90b; font-weight: 600; margin-top: 8px; }
+</style>
+""", unsafe_allow_html=True)
+
+# --- DEVELOPER HEADER SECTION ---
+DEV_NAME = "THUSITHA"
+DEV_PHONE = "+94 74 001 1100"
+
+st.markdown(f"""
+<div class="developer-card">
+    <div class="dev-title">🎯 SMC High-Probability Trading Engine</div>
+    <div class="dev-sub">Multi-Timeframe Confluence (4H Trend Filter + 1H SMC Structure + Volume Validation)</div>
+    <div class="dev-info">👤 Developed by: <b>{DEV_NAME}</b> | 📞 Contact: <b>{DEV_PHONE}</b></div>
+</div>
+""", unsafe_allow_html=True)
 
 default_watchlist = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'ADA-USD', 'BNB-USD', 'DOGE-USD']
 
-def get_swing_df(symbol):
+def fetch_data(symbol, interval, period):
     sym = symbol.strip().upper().replace("USDT", "-USD")
-    if not sym.endswith("-USD"):
-        sym += "-USD"
-    
+    if not sym.endswith("-USD"): sym += "-USD"
     try:
         ticker = yf.Ticker(sym)
-        # Using 4H / 1H interval for stable swing setups
-        df = ticker.history(period="60d", interval="1h")
-        if not df.empty and len(df) >= 50:
+        df = ticker.history(period=period, interval=interval)
+        if not df.empty and len(df) >= 30:
             return df, sym.replace("-USD", "/USDT")
     except Exception:
         pass
@@ -32,117 +54,119 @@ def calculate_rsi(series, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def analyze_stable_swing(symbol):
-    data = get_swing_df(symbol)
-    if not data:
+def analyze_high_accuracy_setup(symbol):
+    df_4h, clean_sym = fetch_data(symbol, interval="1d", period="60d")
+    df_1h, _ = fetch_data(symbol, interval="1h", period="30d")
+
+    if df_4h is None or df_1h is None:
         return None
-    
-    df, clean_sym = data
-    
-    # IMPORTANT: We ignore the currently open live candle (iloc[-1]) 
-    # and ONLY use closed candles (iloc[-2]) to stop repainting!
-    closed_df = df.iloc[:-1] 
-    
-    close = closed_df['Close']
-    high = closed_df['High']
-    low = closed_df['Low']
-    
-    entry_price = close.iloc[-1]
-    
-    ema50 = close.ewm(span=50, adjust=False).mean().iloc[-1]
-    ema200 = close.ewm(span=200, adjust=False).mean().iloc[-1]
-    rsi = calculate_rsi(close).iloc[-1]
-    
-    swing_high = high.iloc[-30:].max()
-    swing_low = low.iloc[-30:].min()
 
-    # Closed Candle Confluence Rules
-    bullish_bos = entry_price > high.iloc[-15:-1].max()
-    bearish_bos = entry_price < low.iloc[-15:-1].min()
+    c_4h = df_4h.iloc[:-1]
+    c_1h = df_1h.iloc[:-1]
 
-    bullish_ob = entry_price <= (swing_low + (swing_high - swing_low) * 0.35)
-    bearish_ob = entry_price >= (swing_high - (swing_high - swing_low) * 0.35)
+    ema50_htf = c_4h['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
+    ema200_htf = c_4h['Close'].ewm(span=200, adjust=False).mean().iloc[-1]
+    
+    htf_bullish = c_4h['Close'].iloc[-1] > ema50_htf and ema50_htf > ema200_htf
+    htf_bearish = c_4h['Close'].iloc[-1] < ema50_htf and ema50_htf < ema200_htf
 
-    bullish_fvg = (close.iloc[-1] > close.iloc[-2]) and (close.iloc[-2] > close.iloc[-3]) and (rsi < 60)
-    bearish_fvg = (close.iloc[-1] < close.iloc[-2]) and (close.iloc[-2] < close.iloc[-3]) and (rsi > 40)
+    avg_vol = c_1h['Volume'].iloc[-20:].mean()
+    current_vol = c_1h['Volume'].iloc[-1]
+    volume_confirmed = current_vol > (avg_vol * 1.1)
 
-    bullish_sweep = (low.iloc[-1] <= low.iloc[-30:-2].min()) and (entry_price > low.iloc[-1])
-    bearish_sweep = (high.iloc[-1] >= high.iloc[-30:-2].max()) and (entry_price < high.iloc[-1])
+    close_1h = c_1h['Close']
+    high_1h = c_1h['High']
+    low_1h = c_1h['Low']
+    entry_price = close_1h.iloc[-1]
 
-    is_bullish = (bullish_bos or bullish_ob or bullish_fvg or bullish_sweep) and (entry_price > ema200 or rsi < 55)
-    is_bearish = (bearish_bos or bearish_ob or bearish_fvg or bearish_sweep) and (entry_price < ema200 or rsi > 45)
+    rsi_1h = calculate_rsi(close_1h).iloc[-1]
+    swing_high = high_1h.iloc[-30:].max()
+    swing_low = low_1h.iloc[-30:].min()
 
-    signal = "⏳ WAIT (Consolidating)"
-    bias = "NEUTRAL"
+    bullish_bos = entry_price > high_1h.iloc[-15:-1].max()
+    bearish_bos = entry_price < low_1h.iloc[-15:-1].min()
+
+    bullish_sweep = (low_1h.iloc[-1] <= low_1h.iloc[-30:-2].min()) and (entry_price > low_1h.iloc[-1])
+    bearish_sweep = (high_1h.iloc[-1] >= high_1h.iloc[-30:-2].max()) and (entry_price < high_1h.iloc[-1])
+
+    is_strong_long = htf_bullish and (bullish_bos or bullish_sweep) and volume_confirmed and (40 < rsi_1h < 68)
+    is_strong_short = htf_bearish and (bearish_bos or bearish_sweep) and volume_confirmed and (32 < rsi_1h < 60)
+
+    signal = "⏳ NO SETUP (Low Probability / Consolidating)"
+    bias = "🟢 HTF BULLISH" if htf_bullish else ("🔴 HTF BEARISH" if htf_bearish else "⚪ NEUTRAL")
     sl, tp1, tp2 = 0.0, 0.0, 0.0
 
-    if is_bullish and not is_bearish:
-        signal = "🚀 SWING LONG"
-        bias = "🟢 BULLISH"
-        sl = swing_low * 0.992
+    if is_strong_long:
+        signal = "🔥 HIGH CONFIRMATION LONG"
+        sl = swing_low * 0.993
         risk = entry_price - sl
-        tp1 = entry_price + (risk * 2.5)
-        tp2 = entry_price + (risk * 4.0)
+        tp1 = entry_price + (risk * 2.0)
+        tp2 = entry_price + (risk * 3.5)
 
-    elif is_bearish and not is_bullish:
-        signal = "📉 SWING SHORT"
-        bias = "🔴 BEARISH"
-        sl = swing_high * 1.008
+    elif is_strong_short:
+        signal = "💥 HIGH CONFIRMATION SHORT"
+        sl = swing_high * 1.007
         risk = sl - entry_price
-        tp1 = entry_price - (risk * 2.5)
-        tp2 = entry_price - (risk * 4.0)
+        tp1 = entry_price - (risk * 2.0)
+        tp2 = entry_price - (risk * 3.5)
 
     return {
         "Coin": clean_sym,
         "Signal": signal,
-        "Bias": bias,
-        "Confirmed Entry ($)": entry_price,
+        "HTF Trend": bias,
+        "Entry ($)": entry_price,
         "SL": sl,
         "TP1": tp1,
         "TP2": tp2,
-        "RSI": round(rsi, 1)
+        "Volume Status": "✅ Confirmed Spike" if volume_confirmed else "⚠️ Low Vol",
+        "RSI": round(rsi_1h, 1)
     }
 
-# UI Code
-st.subheader("🔍 Stable SMC Analysis (Confirmed Candle)")
-custom_coin = st.text_input("Enter Ticker (e.g. BTC, ETH, SOL):", value="BTC")
+# UI Layout
+st.subheader("🔍 High-Probability Setup Scanner")
+custom_coin = st.text_input("Enter Asset Symbol (e.g. BTC, ETH, SOL):", value="BTC")
 
-if st.button("Analyze Confirmed Setup"):
-    res = analyze_stable_swing(custom_coin)
+if st.button("Run Strict Confluence Check"):
+    res = analyze_high_accuracy_setup(custom_coin)
     if res:
         p_fmt = lambda val: f"${val:.4f}" if val < 1 else f"${val:.2f}"
-        st.markdown(f"### Result for **{res['Coin']}**")
+        st.markdown(f"### Analysis for **{res['Coin']}**")
+        
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Confirmed Signal", res["Signal"])
-        c2.metric("Market Bias", res["Bias"])
-        c3.metric("Entry Price", p_fmt(res["Confirmed Entry ($)"]))
-        c4.metric("RSI", res["RSI"])
+        c1.metric("Signal Quality", res["Signal"])
+        c2.metric("4H Trend Filter", res["HTF Trend"])
+        c3.metric("Entry Price", p_fmt(res["Entry ($)"]))
+        c4.metric("Volume Filter", res["Volume Status"])
 
-        if "LONG" in res["Signal"] or "SHORT" in res["Signal"]:
+        if "HIGH CONFIRMATION" in res["Signal"]:
+            st.success("✅ **High Probability SMC Setup Matched! All 3 Filters Confirmed.**")
             st.write("---")
             r1, r2, r3 = st.columns(3)
-            r1.metric("🛑 Stop Loss (SL)", p_fmt(res["SL"]))
-            r2.metric("🎯 Take Profit 1", p_fmt(res["TP1"]))
-            r3.metric("🚀 Take Profit 2", p_fmt(res["TP2"]))
+            r1.metric("🛑 Strict Stop Loss (SL)", p_fmt(res["SL"]))
+            r2.metric("🎯 Target 1 (TP1 - 1:2)", p_fmt(res["TP1"]))
+            r3.metric("🚀 Target 2 (TP2 - 1:3.5)", p_fmt(res["TP2"]))
+        else:
+            st.info("💡 Market conditions do not meet strict criteria right now. Waiting for high-volume structure break.")
     else:
-        st.error("Error fetching data.")
+        st.error("Could not retrieve market data.")
 
 st.divider()
-st.subheader("📊 Watchlist (Confirmed Closed Candles)")
 
-if st.button("🔄 Refresh Watchlist"):
+st.subheader("📊 High-Accuracy Market Scanner")
+if st.button("🔄 Scan Dashboard"):
     st.rerun()
 
 results = []
 for sym in default_watchlist:
-    analysis = analyze_stable_swing(sym)
+    analysis = analyze_high_accuracy_setup(sym)
     if analysis:
         p_f = lambda x: f"${x:.4f}" if x < 1 else f"${x:.2f}"
         results.append({
             "Coin": analysis["Coin"],
             "Signal": analysis["Signal"],
-            "Bias": analysis["Bias"],
-            "Confirmed Entry ($)": p_f(analysis["Confirmed Entry ($)"]),
+            "HTF Trend": analysis["HTF Trend"],
+            "Volume": analysis["Volume Status"],
+            "Entry ($)": p_f(analysis["Entry ($)"]),
             "SL ($)": p_f(analysis["SL"]) if analysis["SL"] > 0 else "-",
             "TP1 ($)": p_f(analysis["TP1"]) if analysis["TP1"] > 0 else "-",
             "TP2 ($)": p_f(analysis["TP2"]) if analysis["TP2"] > 0 else "-",
