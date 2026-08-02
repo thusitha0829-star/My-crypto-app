@@ -2,28 +2,27 @@ import streamlit as st
 import requests
 import pandas as pd
 
-# Page Configuration
 st.set_page_config(page_title="Scalping TA Signal App", page_icon="📈", layout="centered")
 
 st.title("⚡ Live Scalping & TA Analysis App")
 st.caption("Binance Real-Time Data (EMA, RSI & Candlestick Patterns)")
 
-# Default Monitor Coins
 default_symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'KATUSDT']
 
 def get_binance_data(symbol, interval='5m', limit=100):
-    symbol = symbol.upper()
-    if not symbol.endswith('USDT'):
-        symbol += 'USDT'
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    formatted_symbol = symbol.strip().upper()
+    if not formatted_symbol.endswith('USDT'):
+        formatted_symbol += 'USDT'
+        
+    url = f"https://api.binance.com/api/v3/klines?symbol={formatted_symbol}&interval={interval}&limit={limit}"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     try:
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, headers=headers, timeout=8)
         if res.status_code == 200:
-            return res.json(), symbol
-    except:
+            return res.json(), formatted_symbol
+    except Exception as e:
         pass
-    return None, symbol
+    return None, formatted_symbol
 
 def calculate_ema(prices, period):
     if len(prices) < period: return prices[-1]
@@ -86,9 +85,9 @@ def analyze_symbol(symbol):
         "Candle Pattern": pattern
     }
 
-# --- 1. SEARCH ANY COIN SECTION ---
+# --- SEARCH ANY COIN ---
 st.subheader("🔍 Any Coin Search")
-custom_coin = st.text_input("Enter Coin Name (e.g. BTC, KAT, SOL, PEPE):", value="").strip()
+custom_coin = st.text_input("Enter Coin Name (e.g. BTC, KAT, SOL, PEPE):", value="BTC")
 
 if st.button("Analyze Custom Coin"):
     if custom_coin:
@@ -102,11 +101,11 @@ if st.button("Analyze Custom Coin"):
 
                 st.json(res)
             else:
-                st.error("Coin not found on Binance!")
+                st.error(f"'{custom_coin}' not found on Binance! Try typing full symbol like BTCUSDT.")
 
 st.divider()
 
-# --- 2. LIVE WATCHLIST SECTION ---
+# --- LIVE WATCHLIST ---
 st.subheader("📊 Market Scalping Dashboard (5M Timeframe)")
 
 if st.button("🔄 Refresh Market Data"):
