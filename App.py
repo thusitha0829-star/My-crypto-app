@@ -4,25 +4,51 @@ import pandas as pd
 
 st.set_page_config(page_title="Scalping TA Signal App", page_icon="📈", layout="centered")
 
-st.title("⚡ Live Scalping & TA Analysis App")
-st.caption("Binance Real-Time Data (EMA, RSI & Candlestick Patterns)")
+st.title("⚡ Live Crypto Scalping & TA App")
+st.caption("Real-Time Data via Public API (EMA, RSI & Candlestick Patterns)")
 
-default_symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'KATUSDT']
+# Symbol to CoinGecko ID Mapping
+COIN_MAP = {
+    'BTC': 'bitcoin',
+    'ETH': 'ethereum',
+    'SOL': 'solana',
+    'XRP': 'ripple',
+    'ADA': 'cardano',
+    'DOGE': 'dogecoin',
+    'KAT': 'kaspium',  # OR 'kaspa' depending on ticker
+    'PEPE': 'pepe',
+    'BNB': 'binancecoin'
+}
 
-def get_binance_data(symbol, interval='5m', limit=100):
-    formatted_symbol = symbol.strip().upper()
-    if not formatted_symbol.endswith('USDT'):
-        formatted_symbol += 'USDT'
-        
-    url = f"https://api.binance.com/api/v3/klines?symbol={formatted_symbol}&interval={interval}&limit={limit}"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+def get_crypto_data(coin_symbol):
+    sym = coin_symbol.strip().upper().replace("USDT", "")
+    coin_id = COIN_MAP.get(sym, sym.lower())
+    
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=1"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
     try:
         res = requests.get(url, headers=headers, timeout=8)
         if res.status_code == 200:
-            return res.json(), formatted_symbol
-    except Exception as e:
+            prices = [item[1] for item in res.json().get('prices', [])]
+            if len(prices) >= 20:
+                return prices, sym
+    except Exception:
         pass
-    return None, formatted_symbol
+    
+    # Backup API (CoinCap) if CoinGecko fails
+    try:
+        url_backup = f"https://api.coincap.io/v2/assets/{coin_id}/history?interval=m5"
+        res2 = requests.get(url_backup, headers=headers, timeout=8)
+        if res2.status_code == 200:
+            data = res2.json().get('data', [])
+            prices = [float(x['priceUsd']) for x in data]
+            if len(prices) >= 20:
+                return prices, sym
+    except Exception:
+        pass
+
+    return None, sym
 
 def calculate_ema(prices, period):
     if len(prices) < period: return prices[-1]
@@ -44,77 +70,64 @@ def calculate_rsi(prices, period=14):
     if avg_loss == 0: return 100
     return 100 - (100 / (1 + (avg_gain / avg_loss)))
 
-def check_candlestick_patterns(candles):
-    if len(candles) < 4: return "NONE"
-    o1, h1, l1, c1 = float(candles[-2][1]), float(candles[-2][2]), float(candles[-2][3]), float(candles[-2][4])
-    o2, h2, l2, c2 = float(candles[-1][1]), float(candles[-1][2]), float(candles[-1][3]), float(candles[-1][4])
-    body2 = abs(c2 - o2)
-
-    if (c2 > o2) and ((o2 - float(candles[-1][3])) > body2 * 2) and ((float(candles[-1][2]) - c2) < body2 * 0.5): return "BULLISH_HAMMER"
-    if (c2 < o2) and ((float(candles[-1][2]) - o2) > body2 * 2) and ((c2 - float(candles[-1][3])) < body2 * 0.5): return "SHOOTING_STAR"
-    if (c1 < o1) and (c2 > o2) and (c2 > o1) and (o2 < c1): return "BULLISH_ENGULFING"
-    if (c1 > o1) and (c2 < o2) and (c2 < o1) and (o2 > c1): return "BEARISH_ENGULFING"
-    return "NONE"
-
-def analyze_symbol(symbol):
-    data, full_symbol = get_binance_data(symbol)
-    if not data:
+def analyze_coin(symbol):
+    prices, clean_sym = get_crypto_data(symbol)
+    if not prices:
         return None
-    close_prices = [float(c[4]) for c in data]
-    price = close_prices[-1]
-    ema20 = calculate_ema(close_prices, 20)
-    ema50 = calculate_ema(close_prices, 50)
-    rsi = calculate_rsi(close_prices)
-    pattern = check_candlestick_patterns(data)
 
-    if price > ema20 > ema50 and (35 < rsi < 68) and pattern in ["BULLISH_HAMMER", "BULLISH_ENGULFING"]:
+    current_price = prices[-1]
+    ema20 = calculate_ema(prices, 20)
+    ema50 = calculate_ema(prices, 50)
+    rsi = calculate_rsi(prices)
+
+    if current_price > ema20 > ema50 and (35 < rsi < 68):
         signal = "🚀 LONG (BUY)"
-    elif price < ema20 < ema50 and (32 < rsi < 65) and pattern in ["SHOOTING_STAR", "BEARISH_ENGULFING"]:
+    elif current_price < ema20 < ema50 and (32 < rsi < 65):
         signal = "📉 SHORT (SELL)"
     else:
         signal = "⏳ WAIT"
 
-    trend = "🟢 Bullish" if price > ema20 else "🔴 Bearish"
-    
+    trend = "🟢 Bullish" if current_price > ema20 else "🔴 Bearish"
+
     return {
-        "Coin": full_symbol,
-        "Price ($)": f"{price:.4f}" if price < 1 else f"{price:.2f}",
+        "Coin": f"{clean_sym}/USDT",
+        "Price ($)": f"{current_price:.4f}" if current_price < 1 else f"{current_price:.2f}",
         "Signal": signal,
         "Trend": trend,
-        "RSI": round(rsi, 2),
-        "Candle Pattern": pattern
+        "RSI": round(rsi, 2)
     }
 
 # --- SEARCH ANY COIN ---
 st.subheader("🔍 Any Coin Search")
-custom_coin = st.text_input("Enter Coin Name (e.g. BTC, KAT, SOL, PEPE):", value="BTC")
+custom_coin = st.text_input("Enter Coin Name (e.g. BTC, ETH, SOL, DOGE):", value="BTC")
 
 if st.button("Analyze Custom Coin"):
     if custom_coin:
-        with st.spinner("Fetching Binance Data..."):
-            res = analyze_symbol(custom_coin)
+        with st.spinner("Fetching Market Data..."):
+            res = analyze_coin(custom_coin)
             if res:
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Coin", res["Coin"])
                 col2.metric("Price", f"${res['Price ($)']}")
                 col3.metric("Signal", res["Signal"])
-
                 st.json(res)
             else:
-                st.error(f"'{custom_coin}' not found on Binance! Try typing full symbol like BTCUSDT.")
+                st.error(f"Could not fetch data for '{custom_coin}'. Try typing BTC, ETH, SOL, DOGE or PEPE.")
 
 st.divider()
 
 # --- LIVE WATCHLIST ---
-st.subheader("📊 Market Scalping Dashboard (5M Timeframe)")
+st.subheader("📊 Market Scalping Dashboard")
 
 if st.button("🔄 Refresh Market Data"):
     st.rerun()
 
+watchlist = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE']
 results = []
-with st.spinner("Analyzing Main Watchlist..."):
-    for sym in default_symbols:
-        analysis = analyze_symbol(sym)
+
+with st.spinner("Analyzing Watchlist Coins..."):
+    for sym in watchlist:
+        analysis = analyze_coin(sym)
         if analysis:
             results.append(analysis)
 
